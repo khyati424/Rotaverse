@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Environment files (contain secrets such as SMTP and JWT keys)
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+#static data
+static_data/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Claude Code local files
+.claude/
