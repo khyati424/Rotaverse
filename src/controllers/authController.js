@@ -114,6 +114,11 @@ const findLoginUser = async (req, res) => {
   return { user };
 };
 
+// Static OTPs for testing / development accounts
+const STATIC_OTPS = {
+  'romildevloper@gmail.com': '123456'
+};
+
 /**
  * @desc    Send an OTP by email to the registered user (the email the app sends)
  * @route   POST /api/v1/auth/send-otp
@@ -138,12 +143,14 @@ const sendOtp = async (req, res, next) => {
       }
     }
 
-    if (!isMailConfigured()) {
+    const isStaticUser = STATIC_OTPS[email];
+
+    if (!isStaticUser && !isMailConfigured()) {
       console.error('[AUTH] SMTP is not configured: set SMTP_HOST, SMTP_USER and SMTP_PASS in .env');
       return sendError(res, 'Email service is not configured. Please contact the admin.', 503, 'EMAIL_NOT_CONFIGURED');
     }
 
-    const otpCode = generateRandomNumberString(6);
+    const otpCode = isStaticUser || generateRandomNumberString(6);
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
     await Otp.findOneAndUpdate(
@@ -152,12 +159,16 @@ const sendOtp = async (req, res, next) => {
       { upsert: true, returnDocument: 'after' }
     );
 
-    try {
-      await sendOtpEmail(email, otpCode, OTP_TTL_MINUTES);
-    } catch (mailError) {
-      console.error(`[AUTH] Could not email OTP to ${maskEmail(email)}:`, mailError.message);
-      await Otp.deleteOne({ email });
-      return sendError(res, 'Could not send the code. Please try again in a moment.', 502, 'EMAIL_SEND_FAILED');
+    if (isMailConfigured()) {
+      try {
+        await sendOtpEmail(email, otpCode, OTP_TTL_MINUTES);
+      } catch (mailError) {
+        if (!isStaticUser) {
+          console.error(`[AUTH] Could not email OTP to ${maskEmail(email)}:`, mailError.message);
+          await Otp.deleteOne({ email });
+          return sendError(res, 'Could not send the code. Please try again in a moment.', 502, 'EMAIL_SEND_FAILED');
+        }
+      }
     }
 
     return sendSuccess(
@@ -202,9 +213,12 @@ const verifyOtp = async (req, res, next) => {
     const { user } = found;
     const code = String(req.body.otp).trim();
 
+    const staticOtp = STATIC_OTPS[user.email];
+    const isStaticValid = Boolean(staticOtp && code === staticOtp);
+
     const existingOtp = await Otp.findOne({ email: user.email });
     const notExpired = existingOtp && new Date(existingOtp.expiresAt).getTime() > Date.now();
-    const isValid = notExpired && existingOtp.otp === code;
+    const isValid = isStaticValid || (notExpired && existingOtp.otp === code);
 
     if (!isValid) {
       if (existingOtp) {
@@ -223,7 +237,7 @@ const verifyOtp = async (req, res, next) => {
       return sendError(res, 'Invalid or expired OTP code', 400, 'INVALID_OTP');
     }
 
-    if (existingOtp) {
+    if (existingOtp && !isStaticValid) {
       await Otp.deleteOne({ _id: existingOtp._id });
     }
 
